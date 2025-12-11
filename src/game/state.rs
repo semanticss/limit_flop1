@@ -22,7 +22,7 @@ pub struct GameState {
     pub hole_p1: [u8; 2],
     pub board: Vec<u8>,
     pub pot: i32,
-    pub to_call: i32,
+    pub to_call: i32, // maybe dont need this
     pub street: Street, // could use just numbers
     pub next_player: usize,
     pub bets_on_street_curr: u8,

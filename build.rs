@@ -1,10 +1,8 @@
+
 fn main() {
     cc::Build::new()
-        .file("c_eval/pokerlib.cpp")
-        .file("c_eval/mtrand.cpp")
-        .file("wrapper.c")
+        .files(["c_eval/pokerlib.cpp", "c_eval/mtrand.cpp", "wrapper.cpp"])
         .include("c_eval")
         .cpp(true)
         .compile("pokerlib");
 }
-
