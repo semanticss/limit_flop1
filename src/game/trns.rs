@@ -10,6 +10,8 @@ extern "C" {
 }
 
 impl GameState {
+    // default instantiation fn
+
     pub fn eval_7hand(&self, cards: &Vec<i32>) {
         unsafe {
             eval_7hand(
@@ -24,7 +26,7 @@ impl GameState {
 
     pub fn generate_deck(&self) -> GameState {
         let deck = make_deck();
-        shuffle_deck(&mut deck)
+        shuffle_deck(&mut deck);
         deck
     }
 
@@ -115,47 +117,47 @@ impl GameState {
         all_cards
     }
 
-    // this is slightly fucked
-    pub fn side_pot_builder(ps: &[PlayerState]) -> Vec<Pot> {
-        let mut contributions: Vec<u32> = ps
+    // maybe this works
+    pub fn side_pot_builder(&mut self) {
+        self.side_pots.clear();
+        let ps = &self.players;
+        let active_players = ps.iter().filter(|p| !p.folded).collect();
+
+        // get amount each non-folded player contributed
+        let contribution_levels = ps
             .iter()
             .filter(|p| !p.folded && p.money_committed > 0)
             .map(|p| p.money_committed)
             .collect();
 
-        if contributions.is_empty() {
+        if contribution_levels.is_empty() {
             return vec![];
         }
 
-        contributions.sort();
-        contributions.dedup();
+        contribution_levels.sort();
+        contribution_levels.dedup();
 
-        let mut pots = Vec::new();
-        let mut prev = 0;
+        //
+        let mut tier_prev: u8 = 0;
 
-        for &tier in &contributions {
-            let tier_size = tier = prev;
+        for &level in &contribution_levels {
+            let tier_size = tier - tier_prev;
 
-            let eligble_players: Vec<usize> = ps
+            let eligible: Vec<PlayerState> = active_players
                 .iter()
-                .filter(|p| !p.folded && p.money_committed >= tier)
-                .map(|p| p.position)
+                .filter(|p| p.money_committed >= tier)
                 .collect();
 
             if !eligble.is_empty() {
-                let pot_amnt = tier_size * eligble.len() as u32;
-
-                pots.push(Pot {
-                    amnt: pot_amnt,
-                    eligible,
-                })
+                let amount = tier_size * eligible.len() as u32;
+                self.side_pots.push(Pot { amount, eligible })
             }
         }
     }
+
     // needs side pot logic
-    pub fn payoff(&self, hero_seat: usize) -> f32 {
-        // maybe i dont need this because i can just put the payoff in the fold apply action
-        if self.hero.folded {
+    pub fn payoff_by_street(&self, hero_seat: usize) -> f32 {
+        if self.players[self.hero_idx].folded {
             return 0;
         }
         // does not include the hero
@@ -171,12 +173,12 @@ impl GameState {
         match self.street {
             Street::Preflop => {}
             Street::Flop => {
-                let hero_strength = self.eval_5hand(get_cards(self.hero, self.board));
+                let hero_strength =
+                    self.eval_5hand(get_cards(self.players[self.hero_idx], self.board));
                 let villain_strengths: Vec<i32> = active_players
                     .iter()
                     .map(&|n| self.eval_5hand(n.hole, self.board))
                     .collect();
-                // need logic for if people have tied hands
             }
             Street::Turn => {}
             Street::River => return eval_7hand(cards),

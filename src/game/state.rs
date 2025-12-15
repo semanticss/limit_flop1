@@ -33,12 +33,14 @@ pub struct PlayerState {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+// maybe we dont care if someone has folded, but whether they are eligible for a pot?
 pub struct GameState {
-    pub hero: PlayerState,
-    pub villains: Vec<PlayerState>, // length 6
+    pub hero_idx: u8,
+    pub players: Vec<PlayerState>, // length 6, hero is stored here
     pub deck: Vec<i32>,
     pub board: Vec<i32>,
-    pub pot: Pot,
+    pub pot: Pot, // only the big pot, no side pots included
+    pub side_pots: Vec<Pot>,
     pub to_call: i32,   // maybe dont need this
     pub street: Street, // could use just numbers
     pub next_player: usize,
