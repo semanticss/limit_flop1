@@ -241,7 +241,7 @@ impl GameState {
             }
 
             if winners.contains(&hero_seat) {
-                hero_profit += pot.amnt / (winners().len as f32);
+                hero_profit += pot.amnt as f32 / (winners().len as f32);
             }
         }
 
