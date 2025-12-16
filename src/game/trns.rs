@@ -1,3 +1,5 @@
+// this file determines the next gamestate given the current gamestate
+
 use super::cards::{make_deck, shuffle_deck};
 use super::state::{Action, GameState, Street};
 
@@ -5,106 +7,152 @@ use std::cmp;
 
 extern "C" {
     pub fn eval_7hand(c0: i32, c1: i32, c2: i32, c3: i32, c4: i32, c5: i32, c6: i32) -> i32;
-
-    pub fn eval_5hand(c0: i32, c1: i32, c2: i32, c3: i32, c4: i32) -> i32;
 }
 
 impl GameState {
     // default instantiation fn
 
-    pub fn eval_7hand(&self, cards: &Vec<i32>) {
+    pub fn eval_7hand(&self, cards: &[i32; 7]) -> i32 {
         unsafe {
             eval_7hand(
-                cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6], cards[7],
+                cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6],
             )
         }
     }
 
-    pub fn eval_5hand(&self, cards: &Vec<i32>) {
-        unsafe { eval_5hand(cards[0], cards[1], cards[2], cards[3], cards[4], cards[5]) }
-    }
-
-    pub fn generate_deck(&self) -> GameState {
-        let deck = make_deck();
-        shuffle_deck(&mut deck);
-        deck
+    pub fn raise_size(&self) -> u32 {
+        match self.street {
+            Street::Preflop | Street::Flop => 1,
+            Street::Turn | Street::River => 2,
+        }
     }
 
     pub fn legal_actions(&self) -> Vec<Action> {
-        // if u are the first to act you can either call the bb, raise, or fold
-        if gs.history.is_empty() {
-            return vec![Call, Raise, Fold];
+        let p = &self.players[self.curr_idx];
+
+        if p.folded || p.money_behind == 0 {
+            return vec![];
         }
 
-        // if the person behind u checked, u can check raise or fold
-        if gs.history.last() == Check {
-            return vec![Check, Raise, Fold];
+        let to_call = self
+            .current_bet
+            .saturating_sub(p.money_committed_curr_round);
+
+        // case 1: facing no bet
+
+        if to_call == 0 {
+            let mut actions = vec![Action::Check];
+            if self.raises_left > 0 && p.money_behind > 0 {
+                actions.push(Action::Raise);
+            }
+            return actions;
         }
 
-        // also, if you are the first to act in a hand, you can check. issue is if the person in the previous hand called, then you should also be able to check. for this case, i am going to create a special action called Special that indicates a street has passed between betting.
+        //case 2: facing a bet
 
-        if gs.history.last() == Special {
-            return vec![Check, Raise, Fold];
+        let mut actions = vec![Action::Fold, Action::Call];
+        if self.raises_left > 0 && p.money_behind > to_call {
+            actions.push(Action::Raise);
         }
 
-        // idk i dont think the action should ever get back to someone who is all in
+        actions
     }
 
-    pub fn draw_cards(gs: &mut GameState, amnt: usize) -> Vec<i32> {
+    // chance node
+    pub fn draw_cards(&mut self, amnt: usize) {
         for _ in 0..amnt {
-            if let Some(card) = gs.deck.pop() {
-                gs.board.push(card);
-            } else {
-                panic!("deck empty"); // if i see this panic msg im gonna be so mad
+            let card = self.deck.pop().expect("deck empty");
+            self.board.push(card);
+        }
+    }
+
+    pub fn advance_player(&mut self) {
+        let mut next_state = self.clone();
+    }
+
+    pub fn betting_round_complete(&self) -> bool {
+        for p in &self.players {
+            if p.folded {
+                continue;
+            }
+
+            if p.money_behind > 0 && p.money_committed_curr_round != self.current_bet {
+                return false;
             }
         }
+        true
     }
 
+    // unfinished
     pub fn apply_action(&self, a: &Action) -> GameState {
         let mut next_state = self.clone();
+        let idx = next_state.curr_idx;
+        let player = &mut next_state.players[idx];
         // need to add bets to pot, remove from money behind for each player, append the action to the action history, and more prolly
         match a {
             Action::Call => {
-                next_state.push(a);
+                let to_call = next_state.current_bet - player.money_committed_curr_round;
+                let amount = to_call.min(player.money_behind);
+
+                player.money_behind -= amount;
+                player.money_committed_curr_round += amount;
+                player.total_committed += amount;
+                next_state.pot += amount;
             }
             Action::Fold => {
-                next_state.push(a);
+                player.folded = true;
             }
             Action::Raise => {
-                next_state.push(a);
+                let raise_amount = next_state.raise_size();
+                let to_call = next_state.current_bet - player.money_committed_curr_round;
+                let total = to_call + raise_amount;
+
+                let paid = total.min(player.money_behind);
+
+                player.money_behind -= paid;
+                player.committed_this_round += paid;
+                player.total_committed += paid;
+
+                next_state.current_bet += raise_amount;
+                next_state.raises_left -= 1;
+                next_state.last_raiser_idx = Some(idx);
+                next_state.pot += paid;
             }
-            Action::Check => {
-                next_state.push(a);
+            Action::Check => {}
+        }
+
+        next_state.move_turn();
+        next_state
+    }
+
+    pub fn move_turn(&mut self) {
+        let n = self.players.len();
+
+        loop {
+            self.curr_idx = (self.curr_idx + 1) % n;
+            let p = &self.players[self.curr_idx];
+
+            if !p.folded && p.money_behind > 0 {
+                break;
             }
         }
     }
 
-    pub fn apply_street(&self, s: Street) -> GameState {
-        let mut next_state = state.clone();
+    // this could be done
+    pub fn apply_street(&mut self) {
+        for p in &mut self.players {
+            p.money_committed_curr_round = 0;
+        }
 
-        match s {
-            Street::Preflop => next_state,
-            Street::Flop => {
-                next_state.draw_cards(&mut next_state, 3);
-                next_state.street = s;
-                next_state.history.push(Action::Special {
-                    street: Street::Flop,
-                })
-            }
-            Street::Turn => {
-                next_state.draw_cards(&mut next_state, 1);
-                next_state.street = s;
-                next_state.history.push(Action::Special {
-                    street: Street::Turn,
-                })
-            }
-            Street::River => {
-                next_state.draw_cards(&mut next_state, 1);
-                next_state.street = s;
-                next_state.history.push(Action::Special {
-                    street: Street::River,
-                })
-            }
+        self.current_bet = 0;
+        self.raises_left = 3; // this could be wrong
+        self.last_raiser_idx = None;
+
+        self.street = match self.street {
+            Street::Preflop => Street::Flop,
+            Street::Flop => Street::Turn,
+            Street::Turn => Street::River,
+            Street::River => panic!("mf cmon"),
         }
     }
 
@@ -120,68 +168,84 @@ impl GameState {
     // maybe this works
     pub fn side_pot_builder(&mut self) {
         self.side_pots.clear();
-        let ps = &self.players;
-        let active_players = ps.iter().filter(|p| !p.folded).collect();
-
-        // get amount each non-folded player contributed
-        let contribution_levels = ps
+        let active_players: Vec<&PlayerState> = self
+            .players
             .iter()
             .filter(|p| !p.folded && p.money_committed > 0)
-            .map(|p| p.money_committed)
             .collect();
 
-        if contribution_levels.is_empty() {
-            return vec![];
-        }
+        // get amount each non-folded player contributed
+        let mut contribution_levels: Vec<f32> =
+            active_players.iter().map(|p| p.money_committed).collect();
 
-        contribution_levels.sort();
+        contribution_levels.sort_unstable();
         contribution_levels.dedup();
 
         //
-        let mut tier_prev: u8 = 0;
+        let mut tier_prev: u32 = 0;
 
         for &level in &contribution_levels {
-            let tier_size = tier - tier_prev;
+            let tier_size = level - tier_prev;
 
-            let eligible: Vec<PlayerState> = active_players
+            let eligible: Vec<usize> = active_players
                 .iter()
                 .filter(|p| p.money_committed >= tier)
+                .map(|p| p.idx)
                 .collect();
 
-            if !eligble.is_empty() {
+            if !eligible.is_empty() {
                 let amount = tier_size * eligible.len() as u32;
                 self.side_pots.push(Pot { amount, eligible })
             }
+
+            tier_prev = level;
         }
     }
 
-    // needs side pot logic
-    pub fn payoff_by_street(&self, hero_seat: usize) -> f32 {
+    pub fn determine_if_terminal(&self) -> bool {
+        // nvm im slow
+        let active = self.players.iter().filter(|p| !p.folded).count();
+
+        if active <= 1 {
+            return true;
+        }
+
+        self.street == Street::River && self.betting_round_complete();
+    }
+
+    // in the most common case, this function builds the side pots, goes through the side pots, goes through the eligible players in each pot to find the winners of the hand, if the hero is in there, then u divide the winning by how many winners there are
+    pub fn payoff(&mut self, hero_seat: usize) -> f32 {
+        // could be negative chips committed but i think this is right
         if self.players[self.hero_idx].folded {
-            return 0;
+            return -(self.players[self.hero_idx].money_committed);
         }
-        // does not include the hero
-        let mut active_players = vec![];
 
-        // gets all active players
-        for v in self.villains {
-            if !v.folded {
-                active_players.push(v.clone());
+        self.side_pot_builder();
+
+        let mut hero_profit: u32 = 0;
+
+        for pot in &self.side_pots {
+            let mut strongest_hand = 7462;
+            let mut winners: Vec<usize> = Vec::new();
+
+            for &player_idx in &pot.eligible {
+                let cards = self.get_cards(player_idx);
+                let hand_strength = eval_7hand(cards);
+                if hand_strength < strongest_hand {
+                    strongest_hand = hand_strength;
+                    winners.clear();
+                    winners.push(player_idx);
+                } else if hand_strength == strongest_hand {
+                    winners.push(player_idx);
+                }
+            }
+
+            if winners.contains(&hero_seat) {
+                hero_profit += pot.amnt / (winners().len as f32);
             }
         }
 
-        match self.street {
-            Street::Preflop => {}
-            Street::Flop => {
-                let hero_strength =
-                    self.eval_5hand(get_cards(self.players[self.hero_idx], self.board));
-                let villain_strengths: Vec<i32> = active_players
-                    .iter()
-                    .map(&|n| self.eval_5hand(n.hole, self.board))
-                    .collect();
-            }
-            Street::Turn => {}
-            Street::River => return eval_7hand(cards),
-        }
+        hero_profit -= self.players[self.hero_idx].money_committed;
+        hero_profit as f32
     }
 }

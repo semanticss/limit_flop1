@@ -1,0 +1,10 @@
+last to raise logic:
+
+the last aggressor becomes the last to act, and the street is terminal when the current player == the last to act
+
+the GameState is terminal when the current player == the last to act on the River
+
+the GameState is also terminal when all players are all in (a.k.a all players have money_committed == 0)
+
+hand eval logic: https://suffe.cool/poker/evaluator.html
+
