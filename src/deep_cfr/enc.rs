@@ -1,2 +1,5 @@
-// might try to use bitmasking like cactus does for cards but it is a gamestate, so instead of each gamestate being a bunch of different integers, it is just one.
-pub fn encode_state(gs: &GameState) -> Vec<f32> {}
+use crate::game::state::{Action, GameState, PlayerState, Pot, Street};
+use serde::{Deserialize, Serialize};
+
+// this will not fit in a single integer most likely
+pub fn encode_state(gs: &GameState) -> u32 {}

@@ -8,3 +8,10 @@ the GameState is also terminal when all players are all in (a.k.a all players ha
 
 hand eval logic: https://suffe.cool/poker/evaluator.html
 
+TODO
+
+blind logic
+infoset key encoding
+policy fn
+unit tests for game !
+

@@ -10,8 +10,6 @@ extern "C" {
 }
 
 impl GameState {
-    // default instantiation fn
-
     pub fn eval_7hand(&self, cards: &[i32; 7]) -> i32 {
         unsafe {
             eval_7hand(
@@ -138,7 +136,6 @@ impl GameState {
         }
     }
 
-    // this could be done
     pub fn apply_street(&mut self) {
         for p in &mut self.players {
             p.money_committed_curr_round = 0;
@@ -202,7 +199,7 @@ impl GameState {
         }
     }
 
-    pub fn determine_if_terminal(&self) -> bool {
+    pub fn is_terminal(&self) -> bool {
         // nvm im slow
         let active = self.players.iter().filter(|p| !p.folded).count();
 
