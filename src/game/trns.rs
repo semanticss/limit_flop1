@@ -1,16 +1,16 @@
 // this file determines the next gamestate given the current gamestate
-
-use super::cards::{make_deck, shuffle_deck};
-use super::state::{Action, GameState, Street};
-
 use std::cmp;
+use std::convert::TryInto;
+use std::fmt;
+// use super::cards::{make_deck, shuffle_deck};
+use super::state::{Action, GameState, PlayerState, Pot, Street};
 
-extern "C" {
-    pub fn eval_7hand(c0: i32, c1: i32, c2: i32, c3: i32, c4: i32, c5: i32, c6: i32) -> i32;
+unsafe extern "C" {
+    pub unsafe fn eval_7hand(c0: i32, c1: i32, c2: i32, c3: i32, c4: i32, c5: i32, c6: i32) -> i32;
 }
 
 impl GameState {
-    pub fn eval_7hand(&self, cards: &[i32; 7]) -> i32 {
+    pub fn eval_7hand_wrapped(&self, cards: &[i32; 7]) -> i32 {
         unsafe {
             eval_7hand(
                 cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6],
@@ -65,6 +65,7 @@ impl GameState {
     }
 
     pub fn advance_player(&mut self) {
+        // finish this
         let mut next_state = self.clone();
     }
 
@@ -85,10 +86,10 @@ impl GameState {
     pub fn apply_action(&self, a: &Action) -> GameState {
         let mut next_state = self.clone();
         let idx = next_state.curr_idx;
-        let player = &mut next_state.players[idx];
         // need to add bets to pot, remove from money behind for each player, append the action to the action history, and more prolly
         match a {
             Action::Call => {
+                let player = &mut next_state.players[idx];
                 let to_call = next_state.current_bet - player.money_committed_curr_round;
                 let amount = to_call.min(player.money_behind);
 
@@ -98,22 +99,23 @@ impl GameState {
                 next_state.pot += amount;
             }
             Action::Fold => {
+                let player = &mut next_state.players[idx];
                 player.folded = true;
             }
             Action::Raise => {
                 let raise_amount = next_state.raise_size();
+                let player = &mut next_state.players[idx];
                 let to_call = next_state.current_bet - player.money_committed_curr_round;
                 let total = to_call + raise_amount;
 
                 let paid = total.min(player.money_behind);
 
                 player.money_behind -= paid;
-                player.committed_this_round += paid;
+                player.money_committed_curr_round += paid;
                 player.total_committed += paid;
 
                 next_state.current_bet += raise_amount;
                 next_state.raises_left -= 1;
-                next_state.last_raiser_idx = Some(idx);
                 next_state.pot += paid;
             }
             Action::Check => {}
@@ -143,7 +145,6 @@ impl GameState {
 
         self.current_bet = 0;
         self.raises_left = 3; // this could be wrong
-        self.last_raiser_idx = None;
 
         self.street = match self.street {
             Street::Preflop => Street::Flop,
@@ -153,13 +154,15 @@ impl GameState {
         }
     }
 
-    pub fn get_cards(p: &PlayerState, board: &Vec<i32>) -> Vec<i32> {
-        let p_hole = p.hole; // [i32; 2]
-        let mut all_cards: Vec<i32> = p_hole.to_vec();
+    pub fn get_cards(&self, p: usize) -> [i32; 7] {
+        let p_hole = &self.players[p].hole;
+        let board = &self.board;
+        let mut result = [0i32; 7];
 
-        all_cards.extend_from_slice(board);
+        result[0..2].copy_from_slice(p_hole);
+        result[2..7].copy_from_slice(board);
 
-        all_cards
+        result
     }
 
     // maybe this works
@@ -168,12 +171,12 @@ impl GameState {
         let active_players: Vec<&PlayerState> = self
             .players
             .iter()
-            .filter(|p| !p.folded && p.money_committed > 0)
+            .filter(|p| !p.folded && p.total_committed > 0)
             .collect();
 
         // get amount each non-folded player contributed
-        let mut contribution_levels: Vec<f32> =
-            active_players.iter().map(|p| p.money_committed).collect();
+        let mut contribution_levels: Vec<u32> =
+            active_players.iter().map(|p| p.total_committed).collect();
 
         contribution_levels.sort_unstable();
         contribution_levels.dedup();
@@ -184,15 +187,15 @@ impl GameState {
         for &level in &contribution_levels {
             let tier_size = level - tier_prev;
 
-            let eligible: Vec<usize> = active_players
+            let eligible: Vec<u32> = active_players
                 .iter()
-                .filter(|p| p.money_committed >= tier)
-                .map(|p| p.idx)
+                .filter(|p| p.total_committed >= level)
+                .map(|p| p.idx as u32)
                 .collect();
 
             if !eligible.is_empty() {
-                let amount = tier_size * eligible.len() as u32;
-                self.side_pots.push(Pot { amount, eligible })
+                let amnt = tier_size * eligible.len() as u32;
+                self.side_pots.push(Pot { amnt, eligible })
             }
 
             tier_prev = level;
@@ -206,15 +209,26 @@ impl GameState {
         if active <= 1 {
             return true;
         }
-
-        self.street == Street::River && self.betting_round_complete();
+        // not how this works
+        self.street == Street::River && self.betting_round_complete()
     }
 
     // in the most common case, this function builds the side pots, goes through the side pots, goes through the eligible players in each pot to find the winners of the hand, if the hero is in there, then u divide the winning by how many winners there are
-    pub fn payoff(&mut self, hero_seat: usize) -> f32 {
-        // could be negative chips committed but i think this is right
+    // ts messed up rn
+    pub fn payoff(&mut self) -> i32 {
+        // also need to make sure the board has 5 cards
+        while self.board.len() < 5 {
+            if let Some(card) = self.deck.pop() {
+                self.board.push(card);
+            } else {
+                panic!("mf there are no more cards somehow");
+            }
+        }
+
+        assert!(self.board.len() == 5);
+
         if self.players[self.hero_idx].folded {
-            return -(self.players[self.hero_idx].money_committed);
+            return (self.players[self.hero_idx].total_committed as i32) * -1;
         }
 
         self.side_pot_builder();
@@ -226,23 +240,23 @@ impl GameState {
             let mut winners: Vec<usize> = Vec::new();
 
             for &player_idx in &pot.eligible {
-                let cards = self.get_cards(player_idx);
-                let hand_strength = eval_7hand(cards);
+                let cards: [i32; 7] = self.get_cards(player_idx as usize); //by this point the board should have just run out, or just take the next cards from the deck
+                let hand_strength = self.eval_7hand_wrapped(&cards);
                 if hand_strength < strongest_hand {
                     strongest_hand = hand_strength;
                     winners.clear();
-                    winners.push(player_idx);
+                    winners.push(player_idx as usize);
                 } else if hand_strength == strongest_hand {
-                    winners.push(player_idx);
+                    winners.push(player_idx as usize);
                 }
             }
 
-            if winners.contains(&hero_seat) {
-                hero_profit += pot.amnt as f32 / (winners().len as f32);
+            if winners.contains(&self.hero_idx) {
+                hero_profit += pot.amnt as u32 / (winners.len() as u32);
             }
         }
 
-        hero_profit -= self.players[self.hero_idx].money_committed;
-        hero_profit as f32
+        hero_profit -= self.players[self.hero_idx].total_committed;
+        hero_profit as i32
     }
 }
