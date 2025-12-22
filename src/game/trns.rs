@@ -1,23 +1,10 @@
 // this file determines the next gamestate given the current gamestate
-use std::cmp;
-use std::convert::TryInto;
-use std::fmt;
+
+use crate::game::handeval;
 // use super::cards::{make_deck, shuffle_deck};
 use super::state::{Action, GameState, PlayerState, Pot, Street};
 
-unsafe extern "C" {
-    pub unsafe fn eval_7hand(c0: i32, c1: i32, c2: i32, c3: i32, c4: i32, c5: i32, c6: i32) -> i32;
-}
-
 impl GameState {
-    pub fn eval_7hand_wrapped(&self, cards: &[i32; 7]) -> i32 {
-        unsafe {
-            eval_7hand(
-                cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6],
-            )
-        }
-    }
-
     pub fn raise_size(&self) -> u32 {
         match self.street {
             Street::Preflop | Street::Flop => 1,
@@ -62,11 +49,6 @@ impl GameState {
             let card = self.deck.pop().expect("deck empty");
             self.board.push(card);
         }
-    }
-
-    pub fn advance_player(&mut self) {
-        // finish this
-        let mut next_state = self.clone();
     }
 
     pub fn betting_round_complete(&self) -> bool {
@@ -128,6 +110,16 @@ impl GameState {
     pub fn move_turn(&mut self) {
         let n = self.players.len();
 
+        let players_able_to_act = self
+            .players
+            .iter()
+            .filter(|p| !p.folded && p.money_behind > 0)
+            .count();
+
+        if players_able_to_act <= 1 {
+            return;
+        }
+
         loop {
             self.curr_idx = (self.curr_idx + 1) % n;
             let p = &self.players[self.curr_idx];
@@ -146,10 +138,19 @@ impl GameState {
         self.current_bet = 0;
         self.raises_left = 3; // this could be wrong
 
-        self.street = match self.street {
-            Street::Preflop => Street::Flop,
-            Street::Flop => Street::Turn,
-            Street::Turn => Street::River,
+        match self.street {
+            Street::Preflop => {
+                self.draw_cards(3);
+                self.street = Street::Flop;
+            }
+            Street::Flop => {
+                self.draw_cards(1);
+                self.street = Street::Turn;
+            }
+            Street::Turn => {
+                self.draw_cards(1);
+                self.street = Street::River;
+            }
             Street::River => panic!("mf cmon"),
         }
     }
@@ -193,8 +194,14 @@ impl GameState {
                 .map(|p| p.idx as u32)
                 .collect();
 
+            let contributors = self
+                .players
+                .iter()
+                .filter(|p| p.total_committed >= level)
+                .count();
+
             if !eligible.is_empty() {
-                let amnt = tier_size * eligible.len() as u32;
+                let amnt = tier_size * contributors as u32; // include money from people who folded as well
                 self.side_pots.push(Pot { amnt, eligible })
             }
 
@@ -203,14 +210,27 @@ impl GameState {
     }
 
     pub fn is_terminal(&self) -> bool {
-        // nvm im slow
         let active = self.players.iter().filter(|p| !p.folded).count();
 
         if active <= 1 {
             return true;
         }
-        // not how this works
-        self.street == Street::River && self.betting_round_complete()
+
+        if self.street == Street::River && self.betting_round_complete() {
+            return true;
+        }
+
+        let players_with_chips = self
+            .players
+            .iter()
+            .filter(|p| !p.folded && p.money_behind > 0)
+            .count();
+
+        if players_with_chips < 2 && self.betting_round_complete() {
+            return true;
+        }
+
+        false
     }
 
     // in the most common case, this function builds the side pots, goes through the side pots, goes through the eligible players in each pot to find the winners of the hand, if the hero is in there, then u divide the winning by how many winners there are
@@ -236,12 +256,12 @@ impl GameState {
         let mut hero_profit: u32 = 0;
 
         for pot in &self.side_pots {
-            let mut strongest_hand = 7462;
+            let mut strongest_hand = i32::MAX;
             let mut winners: Vec<usize> = Vec::new();
 
             for &player_idx in &pot.eligible {
                 let cards: [i32; 7] = self.get_cards(player_idx as usize); //by this point the board should have just run out, or just take the next cards from the deck
-                let hand_strength = self.eval_7hand_wrapped(&cards);
+                let hand_strength = handeval::eval_7hand(cards);
                 if hand_strength < strongest_hand {
                     strongest_hand = hand_strength;
                     winners.clear();
@@ -252,7 +272,7 @@ impl GameState {
             }
 
             if winners.contains(&self.hero_idx) {
-                hero_profit += pot.amnt as u32 / (winners.len() as u32);
+                hero_profit += pot.amnt / (winners.len() as u32); //floats maybe
             }
         }
 

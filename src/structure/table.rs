@@ -1,5 +1,6 @@
+use crate::game::handeval;
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::Read;
 use std::sync::OnceLock;
 
 static HAND_RANKS: OnceLock<Vec<i32>> = OnceLock::new();
@@ -7,7 +8,7 @@ static HAND_RANKS: OnceLock<Vec<i32>> = OnceLock::new();
 pub fn get_table() -> &'static [i32] {
     HAND_RANKS.get_or_init(|| {
         println!("loading handranks");
-        load_handranks("HandRanks.dat"); // could be wrong filepath
+        load_handranks("HandRanks.dat") // could be wrong filepath
     })
 }
 
@@ -31,19 +32,19 @@ mod tests {
     #[test]
     fn test_hand_eval() {
         let royal_flush = [52, 48, 44, 40, 36, 1, 5];
-        let res1 = eval_7hand(royal_flush);
+        let res1 = handeval::eval_7hand(royal_flush);
         assert_eq!(res1 >> 12, 9, "should be a royal flush");
 
         let four_aces = [49, 50, 51, 52, 45, 46, 1];
-        let res2 = eval_7hand(four_aces);
+        let res2 = handeval::eval_7hand(four_aces);
         assert_eq!(res2 >> 12, 8, "Should be Four of a Kind");
 
         let aces_full_of_kings = [49, 50, 51, 45, 46, 1, 5];
-        let res3 = eval_7hand(aces_full_of_kings);
+        let res3 = handeval::eval_7hand(aces_full_of_kings);
         assert_eq!(res3 >> 12, 7, "Should be a Full House");
 
         let high_card = [21, 14, 11, 8, 1, 38, 32];
-        let res4 = eval_7hand(high_card);
+        let res4 = handeval::eval_7hand(high_card);
         assert_eq!(res4 >> 12, 1, "Should be High Card");
     }
 }

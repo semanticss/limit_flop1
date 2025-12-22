@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::cmp;
+// use std::cmp;
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Street {
@@ -86,6 +86,119 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_side_pot_integrity() {
+        let mut state = test_state();
+
+        state.players.push(PlayerState {
+            idx: 2,
+            hole: [5, 6],
+            money_behind: 1000,
+            money_committed_curr_round: 0,
+            total_committed: 0,
+            folded: false,
+        });
+
+        state.players[0].money_behind = 0;
+        state.players[0].total_committed = 10;
+        state.players[1].money_behind = 0;
+        state.players[1].total_committed = 50;
+        state.players[2].total_committed = 50;
+
+        state.pot = 110;
+
+        state.side_pot_builder();
+
+        assert_eq!(state.side_pots.len(), 2);
+        assert_eq!(state.side_pots[0].amnt, 30);
+        assert_eq!(state.side_pots[1].amnt, 80);
+    }
+
+    #[test]
+    fn test_dead_money_retention() {
+        let mut state = test_state();
+
+        state.players[0].total_committed = 10;
+        state.players[1].total_committed = 10;
+
+        state.players[0].folded = true;
+
+        state.side_pot_builder();
+
+        assert_eq!(state.side_pots[0].amnt, 20);
+    }
+
+    #[test]
+    fn test_split_pot_math() {
+        let mut state = test_state();
+        state.pot = 100;
+        state.players[0].total_committed = 50;
+        state.players[1].total_committed = 50;
+        state.board = vec![10, 11, 12, 13, 14];
+        state.players[0].hole = [1, 2];
+        state.players[1].hole = [1, 2];
+
+        state.hero_idx = 0;
+        let payoff = state.payoff();
+        assert_eq!(payoff, 0);
+    }
+
+    #[test]
+    fn fold_ended() {
+        let mut state = test_state();
+
+        state = state.apply_action(&Action::Raise);
+        state = state.apply_action(&Action::Fold);
+
+        assert!(state.is_terminal());
+    }
+    #[test]
+    fn full_hand() {
+        let mut state = test_state();
+
+        state.deck = vec![20, 21, 22, 17, 10, 11, 12];
+
+        assert_eq!(state.street, Street::Preflop);
+
+        state = state.apply_action(&Action::Check);
+        state = state.apply_action(&Action::Check);
+
+        assert!(state.betting_round_complete());
+        state.apply_street();
+
+        assert_eq!(state.street, Street::Flop);
+        // println!("{}", state.board.len());
+        assert_eq!(state.board.len(), 3);
+
+        state = state.apply_action(&Action::Check);
+        state = state.apply_action(&Action::Check);
+
+        state.apply_street();
+
+        println!("{:?}", state.street);
+        assert_eq!(state.street, Street::Turn);
+        assert_eq!(state.board.len(), 4);
+
+        state = state.apply_action(&Action::Check);
+        state = state.apply_action(&Action::Check);
+
+        state.apply_street();
+
+        println!("{:?}", state.street);
+        assert_eq!(state.street, Street::River);
+        assert_eq!(state.board.len(), 5);
+
+        state = state.apply_action(&Action::Check);
+        state = state.apply_action(&Action::Check);
+
+        assert!(state.is_terminal());
+
+        let payoff = state.payoff();
+
+        assert_eq!(state.pot, 0);
+        assert_eq!(payoff, 0);
+    }
+
+    #[test]
     fn test_legal_actions_no_bet() {
         let state = test_state();
 
@@ -129,10 +242,5 @@ mod tests {
         assert_eq!(p.money_behind, 8);
         assert_eq!(p.money_committed_curr_round, 2);
         assert_eq!(next_state.pot, 2);
-    }
-
-    #[test]
-    fn test_raise_trns() {
-        let mut state = test_state();
     }
 }
