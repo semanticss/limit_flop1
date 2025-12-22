@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+file = "0.1.1"
+io = "0.0.2"
+oncelock = "0.1.0-alpha.0"
 rand = "0.9.2"
 serde = { version = "1.0.228", features = ["derive"] }
 
