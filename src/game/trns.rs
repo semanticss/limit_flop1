@@ -1,8 +1,7 @@
 // this file determines the next gamestate given the current gamestate
 
-use crate::game::handeval;
-// use super::cards::{make_deck, shuffle_deck};
 use super::state::{Action, GameState, PlayerState, Pot, Street};
+use crate::game::handeval;
 
 impl GameState {
     pub fn raise_size(&self) -> u32 {

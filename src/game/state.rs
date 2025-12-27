@@ -47,6 +47,7 @@ pub struct GameState {
     pub board: Vec<i32>,
 
     pub hero_idx: usize,
+    betting_history: Option<Vec<(usize, Action)>>,
 }
 
 fn test_state() -> GameState {
@@ -78,6 +79,7 @@ fn test_state() -> GameState {
         deck: vec![10, 11, 12, 13, 14],
         board: vec![],
         hero_idx: 0,
+        betting_history: None,
     }
 }
 
